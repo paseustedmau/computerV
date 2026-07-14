@@ -1,146 +1,228 @@
-import os
-import base64
-import time
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+"""Aplicacion web de asistencia facial construida con FastAPI y DeepFace."""
 
-# Intentar importar DeepFace para resiliencia durante la fase de instalación
+from __future__ import annotations
+
+import base64
+import csv
+import json
+import os
+import re
+import threading
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
+
 try:
     from deepface import DeepFace
-except ImportError:
+except ImportError:  # Permite mostrar una explicacion util si falta la dependencia.
     DeepFace = None
 
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+STATIC_DIR = BASE_DIR / "static"
+DATA_DIR = Path(os.getenv("ATTENDANCE_DATA_DIR", PROJECT_DIR / "data"))
+PEOPLE_FILE = DATA_DIR / "people.json"
+ATTENDANCE_FILE = DATA_DIR / "attendance.csv"
+MODEL_NAME = os.getenv("DEEPFACE_MODEL", "Facenet512")
+DETECTOR_BACKEND = os.getenv("DEEPFACE_DETECTOR", "opencv")
+DISTANCE_THRESHOLD = float(os.getenv("FACE_DISTANCE_THRESHOLD", "0.30"))
+DATA_LOCK = threading.Lock()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    ensure_storage()
+    yield
+
+
 app = FastAPI(
-    title="MoodMeter API - Diagnóstico e Historial de Expresión Facial",
-    description="Backend ligero para analizar emociones faciales en tiempo real usando DeepFace y Keras."
+    title="Presente",
+    description="Sistema local de asistencia con reconocimiento facial",
+    version="1.0.0",
+    lifespan=lifespan,
 )
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Habilitar CORS para permitir integraciones locales ágiles y file://
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# Definir carpetas clave de plantillas y archivos estáticos
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+class ImagePayload(BaseModel):
+    image: str = Field(min_length=20, description="Imagen como Data URL base64")
 
-# Servir archivos estáticos si la carpeta existe
-if os.path.exists(TEMPLATES_DIR):
-    app.mount("/static", StaticFiles(directory=TEMPLATES_DIR), name="static")
 
-# Modelo de datos Pydantic para recibir capturas en base64
-class MoodAnalysisRequest(BaseModel):
-    image: str  # String en formato DataURL o Base64 simple
+class EnrollmentPayload(ImagePayload):
+    student_id: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=2, max_length=100)
 
-def save_base64_image(base64_str: str, file_path: str):
-    """Decodifica un string base64 (removiendo encabezados DataURL) y lo guarda en disco."""
+    @field_validator("student_id")
+    @classmethod
+    def clean_student_id(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9_-]+", value):
+            raise ValueError("Usa solo letras, numeros, guion o guion bajo")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if len(value) < 2:
+            raise ValueError("Escribe un nombre valido")
+        return value
+
+
+def ensure_storage() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not PEOPLE_FILE.exists():
+        PEOPLE_FILE.write_text("[]\n", encoding="utf-8")
+    if not ATTENDANCE_FILE.exists():
+        with ATTENDANCE_FILE.open("w", newline="", encoding="utf-8") as file:
+            csv.writer(file).writerow(["date", "time", "student_id", "name", "distance"])
+
+
+def decode_image(data_url: str) -> np.ndarray:
+    """Convierte un Data URL en una imagen OpenCV y limita entradas enormes."""
     try:
-        if "," in base64_str:
-            base64_str = base64_str.split(",")[1]
-        img_data = base64.b64decode(base64_str)
-        with open(file_path, "wb") as f:
-            f.write(img_data)
-        return True
-    except Exception as e:
-        print(f"Error al decodificar imagen Base64: {e}")
-        return False
+        encoded = data_url.split(",", 1)[1] if "," in data_url else data_url
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "La imagen no tiene un formato base64 valido.") from exc
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(413, "La imagen supera el limite de 10 MB.")
+    image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "No fue posible leer la imagen.")
+    return image
+
+
+def embedding_for(image: np.ndarray) -> list[float]:
+    if DeepFace is None:
+        raise HTTPException(503, "DeepFace no esta instalado. Ejecuta: pip install -r requirements.txt")
+    try:
+        representations = DeepFace.represent(
+            img_path=image,
+            model_name=MODEL_NAME,
+            detector_backend=DETECTOR_BACKEND,
+            enforce_detection=True,
+            align=True,
+        )
+    except Exception as exc:
+        message = str(exc).lower()
+        if "face" in message or "detect" in message:
+            raise HTTPException(422, "No se detecto un rostro claro. Mira al frente y mejora la iluminacion.") from exc
+        raise HTTPException(500, f"DeepFace no pudo procesar la imagen: {exc}") from exc
+    if len(representations) != 1:
+        raise HTTPException(422, "Debe aparecer exactamente una persona en la imagen.")
+    return [float(value) for value in representations[0]["embedding"]]
+
+
+def load_people() -> list[dict[str, Any]]:
+    ensure_storage()
+    try:
+        return json.loads(PEOPLE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(500, "No fue posible leer el registro de personas.") from exc
+
+
+def save_people(people: list[dict[str, Any]]) -> None:
+    temp_file = PEOPLE_FILE.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(people, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_file.replace(PEOPLE_FILE)
+
+
+def cosine_distance(first: list[float], second: list[float]) -> float:
+    a, b = np.asarray(first), np.asarray(second)
+    denominator = np.linalg.norm(a) * np.linalg.norm(b)
+    return 1.0 if denominator == 0 else float(1 - np.dot(a, b) / denominator)
+
+
+def attendance_rows(date_filter: str | None = None) -> list[dict[str, str]]:
+    ensure_storage()
+    with ATTENDANCE_FILE.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    if date_filter:
+        rows = [row for row in rows if row["date"] == date_filter]
+    return list(reversed(rows))
+
 
 @app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    """Sirve la interfaz web del MoodMeter."""
-    index_path = os.path.join(TEMPLATES_DIR, "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read(), status_code=200)
-    return HTMLResponse(
-        content="<h1>MoodMeter Frontend no encontrado</h1><p>Asegúrate de que la carpeta templates/index.html exista.</p>",
-        status_code=404
-    )
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
-@app.post("/api/analyze-mood")
-async def analyze_mood(payload: MoodAnalysisRequest):
-    """
-    Analiza una imagen facial y devuelve las emociones de forma porcentual,
-    el recuadro de la cara y el tiempo de inferencia de la red neuronal.
-    """
-    if not DeepFace:
-        raise HTTPException(
-            status_code=503,
-            detail="La librería DeepFace se está cargando o no se encuentra instalada en el sistema."
-        )
 
-    # Crear directorio temporal para procesar la imagen actual
-    temp_dir = os.path.join(BASE_DIR, "..", "data", "temp")
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    temp_filename = f"mood_{int(time.time() * 1000)}.jpg"
-    temp_path = os.path.join(temp_dir, temp_filename)
+@app.get("/api/status")
+def status() -> dict[str, Any]:
+    today = datetime.now().date().isoformat()
+    return {
+        "ready": DeepFace is not None,
+        "model": MODEL_NAME,
+        "threshold": DISTANCE_THRESHOLD,
+        "registered": len(load_people()),
+        "present_today": len(attendance_rows(today)),
+    }
 
-    # Guardar imagen en disco de forma temporal
-    if not save_base64_image(payload.image, temp_path):
-        raise HTTPException(status_code=400, detail="La imagen provista no tiene un formato Base64 decodificable válido.")
 
-    start_time = time.time()
-    try:
-        # Analizar emociones usando DeepFace con el backend de OpenCV para máxima ligereza
-        # actions=['emotion'] indica a la CNN calcular únicamente expresiones, acelerando el cómputo
-        analysis = DeepFace.analyze(
-            img_path=temp_path,
-            actions=['emotion'],
-            enforce_detection=True,  # Lanza excepción si no encuentra rostro detectable
-            detector_backend="opencv"
-        )
+@app.get("/api/people")
+def people() -> list[dict[str, str]]:
+    return [{"student_id": person["student_id"], "name": person["name"]} for person in load_people()]
 
-        inference_time = round(time.time() - start_time, 3)
 
-        # Si el análisis retorna una lista (caso típico en versiones modernas de DeepFace)
-        if isinstance(analysis, list):
-            result = analysis[0]
+@app.post("/api/enroll", status_code=201)
+def enroll(payload: EnrollmentPayload) -> dict[str, Any]:
+    embedding = embedding_for(decode_image(payload.image))
+    with DATA_LOCK:
+        people_list = load_people()
+        existing = next((p for p in people_list if p["student_id"] == payload.student_id), None)
+        person = {"student_id": payload.student_id, "name": payload.name, "embedding": embedding}
+        if existing:
+            people_list[people_list.index(existing)] = person
         else:
-            result = analysis
+            people_list.append(person)
+        save_people(people_list)
+    return {"success": True, "updated": existing is not None, "person": {"student_id": payload.student_id, "name": payload.name}}
 
-        # Extraer variables principales
-        emotions_raw = result["emotion"]  # Diccionario con 7 emociones
-        dominant_emotion = result["dominant_emotion"]
-        region = result["region"]  # Caja facial: {x, y, w, h}
 
-        # Asegurar remoción del archivo temporal
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+@app.post("/api/recognize")
+def recognize(payload: ImagePayload) -> dict[str, Any]:
+    probe = embedding_for(decode_image(payload.image))
+    people_list = load_people()
+    if not people_list:
+        raise HTTPException(409, "No hay alumnos registrados. Realiza la primera alta.")
+    ranked = sorted((cosine_distance(probe, p["embedding"]), p) for p in people_list)
+    distance, person = ranked[0]
+    if distance > DISTANCE_THRESHOLD:
+        return {"success": False, "recognized": False, "distance": round(distance, 4), "message": "Rostro no reconocido"}
 
-        # Devolver respuesta estructurada
-        return {
-            "success": True,
-            "dominant_emotion": dominant_emotion,
-            "emotions": {k: float(round(v, 2)) for k, v in emotions_raw.items()},
-            "box": {
-                "x": int(region.get("x", 0)),
-                "y": int(region.get("y", 0)),
-                "w": int(region.get("w", 0)),
-                "h": int(region.get("h", 0))
-            },
-            "inference_time_seconds": float(inference_time)
-        }
+    now = datetime.now()
+    date, current_time = now.date().isoformat(), now.strftime("%H:%M:%S")
+    with DATA_LOCK:
+        already_present = any(row["student_id"] == person["student_id"] for row in attendance_rows(date))
+        if not already_present:
+            with ATTENDANCE_FILE.open("a", newline="", encoding="utf-8") as file:
+                csv.writer(file).writerow([date, current_time, person["student_id"], person["name"], f"{distance:.4f}"])
+    return {
+        "success": True,
+        "recognized": True,
+        "already_present": already_present,
+        "person": {"student_id": person["student_id"], "name": person["name"]},
+        "time": current_time,
+        "distance": round(distance, 4),
+    }
 
-    except Exception as e:
-        # Limpiar archivo temporal
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
 
-        err_msg = str(e)
-        if "Face could not be detected" in err_msg:
-            raise HTTPException(
-                status_code=422,
-                detail="No se detectó ningún rostro en la imagen. Intenta con una mejor iluminación y colócate de frente."
-            )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error en el procesamiento neuronal de la imagen: {err_msg}"
-        )
+@app.get("/api/attendance")
+def attendance(date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")) -> list[dict[str, str]]:
+    return attendance_rows(date)
+
+
+@app.get("/api/attendance/export")
+def export_attendance() -> FileResponse:
+    ensure_storage()
+    return FileResponse(ATTENDANCE_FILE, media_type="text/csv", filename="asistencia.csv")

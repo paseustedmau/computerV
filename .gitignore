@@ -1,32 +1,8 @@
-# Entornos virtuales y dependencias locales
-venv/
 .venv/
-env/
-ENV/
-
-# Python y compilaciones
+venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.ipynb_checkpoints/
-
-# Archivos del sistema operativo
+*.py[cod]
+.pytest_cache/
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Datos de la aplicación y temporales
-data/temp/
-data/registered_faces/
-data/users_db.json
-
-# Entorno de desarrollo e IDEs
-.idea/
-.vscode/
-*.swp
-*.swo
+data/people.json
+data/attendance.csv
