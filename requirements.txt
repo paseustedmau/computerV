@@ -1,8 +1,9 @@
-deepface
-fastapi
-uvicorn
-python-multipart
-numpy
-tf-keras
-scipy
-opencv-python-headless
+deepface==0.0.95
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+numpy>=1.26,<2.1
+tf-keras>=2.16,<2.20
+# Una sola distribucion de OpenCV. Instalar tambien la variante "headless"
+# sobrescribe el mismo modulo cv2 y puede dejarlo incompleto.
+opencv-python>=4.10,<5
+pydantic>=2.7,<3

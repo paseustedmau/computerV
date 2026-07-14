@@ -1,35 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# start.sh - Script de inicialización y despliegue rápido para MoodMeter
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$DIR"
+cd "$(dirname "$0")"
 
-echo "=========================================================="
-echo "          INICIANDO PIPELINE DE MOODMETER 📊🎭            "
-echo "=========================================================="
-echo ""
-
-# Validar y crear entorno virtual venv si no existe
-if [ ! -d "venv" ]; then
-    echo "[!] Entorno virtual 'venv' no detectado. Creándolo e instalando dependencias..."
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install --upgrade pip
-    pip install -r requirements.txt
-else
-    echo "[x] Entorno virtual 'venv' detectado. Activándolo..."
-    source venv/bin/activate
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_BIN="${PYTHON_BIN_OVERRIDE:-python3.11}"
 fi
 
-echo ""
-echo "[*] Servidor FastAPI arrancando de forma local en http://127.0.0.1:8000"
-echo "[*] Abre tu navegador web en esa dirección para ver tu MoodMeter."
-echo "[!] Nota: La primera vez que el backend realice un análisis, DeepFace"
-echo "    descargará automáticamente el modelo convolucional de emociones (~20MB)."
-echo "    Esto se realiza una sola vez de forma interna."
-echo ""
-echo "Presiona Ctrl+C para detener el servidor."
-echo "----------------------------------------------------------"
+if [ ! -d ".venv" ]; then
+  echo "Creando entorno virtual..."
+  "$PYTHON_BIN" -m venv .venv
+fi
 
-# Iniciar servidor local
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+echo "Presente estará disponible en http://127.0.0.1:8000"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000

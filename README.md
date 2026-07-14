@@ -1,97 +1,129 @@
-# MoodMeter 📊🎭 — Decodificador de Expresiones Faciales con IA
+# Presente — sistema de asistencia con reconocimiento facial
 
-**MoodMeter** es un playground interactivo y didáctico de visión por computadora diseñado para analizar emociones y microexpresiones faciales en tiempo real. 
+Aplicación web local que registra asistencia al reconocer el rostro de un alumno con **DeepFace**. El profesor puede dar de alta alumnos, tomar asistencia desde la cámara, consultar el historial y descargarlo como CSV.
 
-Impulsado por **FastAPI** en el backend y la librería de aprendizaje profundo **DeepFace**, el sistema traduce capturas de video en distribuciones de probabilidad emocional usando una **Red Neuronal Convolucional (CNN)** de última generación y despliega un dashboard con estética premium **Glassmorphism en Modo Oscuro** junto con explicaciones conceptuales integradas.
+## Funcionalidades
 
----
+- Registro de alumnos con nombre, matrícula y una captura facial.
+- Reconocimiento con el modelo `Facenet512` de DeepFace.
+- Una sola asistencia por alumno y por día.
+- Historial persistente y descarga en CSV.
+- Interfaz adaptable a computadora, tableta y teléfono.
+- Las fotografías no se guardan: se procesan en memoria y se conserva únicamente el embedding facial.
 
-## 🧠 ¿Cómo Decodifica la IA las Emociones?
+## Requisitos
 
-A diferencia de las computadoras, los seres humanos percibimos expresiones faciales de forma instantánea y subconsciente. Para que una máquina replique esto, implementa un pipeline convolucional jerárquico paso a paso:
+- Python **3.10, 3.11 o 3.12** (se recomienda 3.11).
+- Cámara web y un navegador moderno.
+- Conexión a internet durante la primera ejecución para descargar los pesos de Facenet512.
 
-```
-[ Entrada: Webcam o Foto ]
-          │
-          ▼
-[ Detector de Rostro (OpenCV) ] ──> Recorta el rostro y alinea ojos y boca.
-          │
-          ▼
-[ Capas Convolucionales de la CNN ] ──> Extraen rasgos abstractos (comisura de labios, cejas).
-          │
-          ▼
-[ Capa Completamente Conectada ] ──> Genera 7 puntuaciones brutas (logits) de emoción.
-          │
-          ▼
-[ Función de Activación Softmax ] ──> Normaliza los logits en probabilidades (suman 100%).
-          │
-          ├───────────────────────────┐
-          ▼                           ▼
-[ Medidores Neón en Vivo ]     [ Curva Dinámica (Mood Timeline) ]
-```
+> Este es un proyecto académico. El reconocimiento facial es un dato biométrico: solicita consentimiento, limita el acceso a la carpeta `data/` y no lo uses para tomar decisiones de alto impacto.
 
-### La Matemática Detrás: Función Softmax
-La última capa de la red de emociones arroja puntuaciones crudas ($z_i$) para cada emoción básica. Para traducir estas puntuaciones abstractas en porcentajes legibles que sumen exactamente **100%**, la red implementa la función matemática **Softmax**:
+## Instalación y ejecución
 
-$$\sigma(\mathbf{z})_i = \frac{e^{z_i}}{\sum_{j=1}^{K} e^{z_j}}$$
+Desde la raíz del repositorio:
 
-* La función aplica un operador exponencial ($e^{z_i}$) a cada puntuación para asegurar que todos los valores sean estrictamente positivos.
-* Luego, divide cada valor por la suma de todos los exponenciales ($\sum e^{z_j}$), convirtiendo los números en una distribución de probabilidad coherente.
-* La probabilidad más alta indica la **emoción dominante** calculada por la IA.
-
----
-
-## 📂 Estructura del Repositorio
-
-La arquitectura del proyecto está optimizada para ser ligera, rápida y 100% libre de bases de datos persistentes:
-
-```
-computerV/
-├── app/
-│   ├── main.py                 # Servidor FastAPI con pipeline de inferencia DeepFace
-│   └── templates/
-│       ├── index.html          # Frontend premium en HTML5 con Canvas y webcam
-│       └── style.css           # Estilos de alta gama (neón, vidrio esmerilado y animaciones)
-├── requirements.txt            # Dependencias del proyecto de Python
-└── start.sh                    # Script bash para instalación y arranque automático
-```
-
----
-
-## 🛠️ Instalación y Arranque Automático
-
-Sigue estos sencillos pasos para instalar y poner en marcha **MoodMeter** en tu máquina local:
-
-### 1. Navegar al Directorio del Proyecto
 ```bash
-cd /Users/leonelmendiola/computerV
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
-### 2. Arrancar la Aplicación
-El sistema incluye un script automatizado `start.sh` que se encargará de crear el entorno virtual (`venv`), actualizar `pip`, instalar todas las dependencias y levantar el servidor FastAPI:
+En Windows, la activación del entorno es:
+
+```powershell
+.venv\Scripts\activate
+```
+
+Abre [http://127.0.0.1:8000](http://127.0.0.1:8000). Permite el acceso a la cámara cuando el navegador lo solicite.
+
+También puedes usar el script incluido:
+
 ```bash
+chmod +x start.sh
 ./start.sh
 ```
 
-### 3. Abrir el Navegador
-Una vez que el servidor reporte estar listo, abre tu navegador en:
-👉 **[http://127.0.0.1:8000](http://127.0.0.1:8000)**
+La primera inferencia tarda más porque DeepFace descarga y carga el modelo. Las siguientes son más rápidas.
 
-> 💡 **Nota de Primera Ejecución**: La primera vez que presiones "Escanear Rostro", DeepFace descargará automáticamente los pesos preentrenados del clasificador de emociones de Keras (~20MB). Este proceso se realiza una sola vez de forma interna y tardará solo unos segundos según tu velocidad de internet.
+## Cómo usarlo
 
----
+1. Abre **Registrar alumno**.
+2. Escribe nombre y matrícula, activa la cámara y pulsa **Guardar registro**. Debe aparecer exactamente un rostro, de frente y bien iluminado.
+3. Abre **Tomar asistencia**, activa la cámara y pulsa **Registrar asistencia**.
+4. Revisa **Historial** o pulsa **Descargar CSV**.
 
-## 💻 Características del Dashboard
+Para probar con varias personas, repite el alta con cada alumno. Si vuelves a registrar una matrícula existente, se actualizan su nombre y embedding.
 
-* **Captura Multidispositivo**: Si cuentas con cámara web activa, la rejilla láser cibernética escaneará tu rostro en vivo. Si no posees cámara web, haz clic en **Archivo** para subir cualquier fotografía local.
-* **Mira Láser Flotante**: Al completar el escaneo, verás un recuadro cibernético dashed de color cian dibujado exactamente sobre las coordenadas físicas de tu rostro.
-* **Gauges de Distribución**: Muestra barras neón de colores que representan el peso asignado por la red a cada emoción en tiempo real.
-* **Mood Timeline (Línea de Tiempo)**: Un gráfico dinámico hecho con HTML5 Canvas que conecta los puntos de tus escaneos secuenciales. La curva cambia de color dinámicamente según la emoción dominante registrada en cada paso, ilustrando tu transición emocional (ej. de enojo a alegría).
+## Datos generados
 
----
+La aplicación crea automáticamente:
 
-## ⚡ Tecnologías Utilizadas
-* **FastAPI** — API de alta velocidad en Python.
-* **DeepFace** — Framework de análisis facial inmersivo.
-* **OpenCV** — Localización y procesamiento espacial del rostro.
-* **HTML5 / CSS3 / JavaScript (ES6)** — Frontend premium inmersivo sin dependencias pesadas.
+```text
+data/
+├── people.json       # Matrícula, nombre y embedding facial
+└── attendance.csv    # Fecha, hora, matrícula, nombre y distancia
+```
+
+Estos archivos están ignorados por Git. Para reiniciar la demostración, detén el servidor y elimina ambos archivos; se recrearán al arrancar.
+
+## Configuración opcional
+
+Se pueden definir variables de entorno antes de iniciar:
+
+| Variable | Valor predeterminado | Uso |
+|---|---:|---|
+| `DEEPFACE_MODEL` | `Facenet512` | Modelo de embeddings |
+| `DEEPFACE_DETECTOR` | `opencv` | Detector facial |
+| `FACE_DISTANCE_THRESHOLD` | `0.30` | Distancia coseno máxima aceptada |
+| `ATTENDANCE_DATA_DIR` | `./data` | Carpeta de persistencia |
+
+Un umbral menor es más estricto. La iluminación, pose, cámara y población afectan el resultado; valida el umbral con datos representativos antes de cualquier uso real.
+
+## Arquitectura
+
+```text
+Captura del navegador
+        ↓
+FastAPI decodifica la imagen en memoria
+        ↓
+DeepFace detecta, alinea y genera embedding Facenet512
+        ↓
+Distancia coseno contra alumnos registrados
+        ↓
+Coincidencia → registro único diario en CSV
+```
+
+## Pruebas
+
+Las pruebas no descargan modelos: sustituyen la inferencia por embeddings controlados.
+
+```bash
+pip install pytest httpx
+pytest -q
+```
+
+## Estructura
+
+```text
+app/
+├── main.py
+└── static/
+    ├── app.js
+    ├── index.html
+    └── style.css
+tests/
+└── test_app.py
+requirements.txt
+start.sh
+```
+
+## API principal
+
+- `POST /api/enroll` — registra o actualiza un alumno.
+- `POST /api/recognize` — reconoce y registra asistencia.
+- `GET /api/attendance` — devuelve el historial; acepta `?date=AAAA-MM-DD`.
+- `GET /api/attendance/export` — descarga el CSV.
+- `GET /docs` — documentación interactiva generada por FastAPI.

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sistema local de asistencia escolar mediante reconocimiento facial con DeepFace.">
+  <title>Presente — Asistencia facial</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Serif+Display&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="#" aria-label="Ir al inicio"><span class="brand-mark">P</span><span>Presente</span></a>
+    <div class="system-state"><span class="pulse"></span><span id="systemState">Comprobando sistema…</span></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Control de asistencia · ciclo actual</p>
+        <h1>Una mirada.<br><em>Presente.</em></h1>
+      </div>
+      <p class="hero-copy">Reconocimiento facial local para registrar la entrada al salón de forma rápida, clara y sin contraseñas.</p>
+    </section>
+
+    <nav class="tabs" aria-label="Secciones principales">
+      <button class="tab active" data-view="checkin">Tomar asistencia</button>
+      <button class="tab" data-view="enroll">Registrar alumno</button>
+      <button class="tab" data-view="records">Historial</button>
+    </nav>
+
+    <section id="checkin" class="view active">
+      <div class="workspace">
+        <article class="camera-card">
+          <div class="camera-heading"><span>01 / Visor</span><span id="cameraLabel">Cámara inactiva</span></div>
+          <div class="viewport">
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="canvas" hidden></canvas>
+            <div class="guide" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+            <div class="camera-empty" id="cameraEmpty"><span class="face-symbol">◉</span><p>Activa la cámara y coloca un rostro dentro de la guía.</p></div>
+          </div>
+          <div class="camera-actions">
+            <button class="button secondary" id="cameraButton">Activar cámara</button>
+            <button class="button primary" id="recognizeButton" disabled>Registrar asistencia <span>→</span></button>
+          </div>
+          <p class="privacy-note">La imagen se procesa localmente y no se conserva.</p>
+        </article>
+
+        <aside class="today-panel">
+          <p class="eyebrow">Resumen de hoy</p>
+          <div class="big-number" id="todayCount">0</div>
+          <p>personas presentes</p>
+          <div class="rule"></div>
+          <div class="latest" id="latest"><span>Aún no hay registros hoy.</span></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="enroll" class="view">
+      <div class="form-layout">
+        <div>
+          <p class="section-number">02</p>
+          <h2>Alta de alumno</h2>
+          <p>Captura una imagen frontal. Si la matrícula ya existe, sus datos biométricos se actualizarán.</p>
+        </div>
+        <form id="enrollForm" class="enroll-form">
+          <label>Nombre completo<input id="studentName" autocomplete="name" maxlength="100" required placeholder="Ej. Ada Lovelace"></label>
+          <label>Matrícula<input id="studentId" maxlength="40" pattern="[A-Za-z0-9_-]+" required placeholder="Ej. A01234567"></label>
+          <div class="enroll-preview"><video id="enrollVideo" autoplay muted playsinline></video><p id="enrollEmpty">Activa la cámara para tomar la fotografía.</p></div>
+          <button type="button" class="button secondary" id="enrollCameraButton">Activar cámara</button>
+          <button type="submit" class="button primary" id="enrollButton" disabled>Guardar registro <span>→</span></button>
+        </form>
+      </div>
+    </section>
+
+    <section id="records" class="view">
+      <div class="records-heading"><div><p class="section-number">03</p><h2>Libro de asistencia</h2></div><a class="button secondary" href="/api/attendance/export">Descargar CSV</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Matrícula</th><th>Nombre</th><th>Coincidencia</th></tr></thead><tbody id="recordsBody"></tbody></table></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
